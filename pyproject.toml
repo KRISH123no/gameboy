@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gameboy"
+version = "0.1.0"
+description = "A Game Boy emulator written from scratch: a cycle-counted LR35902 core, a scanline PPU, and a debugger."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Krish Saxena" }]
+keywords = ["gameboy", "emulator", "lr35902", "retro", "systems-programming"]
+dependencies = []
+
+[project.optional-dependencies]
+play = ["pygame>=2.6"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+gameboy = "gameboy.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gameboy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

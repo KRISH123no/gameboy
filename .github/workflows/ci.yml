@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        run: pytest -q
+      - name: Boot the demo cartridge and render a frame
+        run: |
+          python -m gameboy info
+          python -m gameboy screenshot --frames 30 --out /tmp/frame.png
+          python -m gameboy disasm --at 0x150 --count 5
+
+  window:
+    # The emulator core has no dependencies; only the window needs pygame.
+    # This job proves the display path works, headlessly.
+    runs-on: ubuntu-latest
+    env:
+      SDL_VIDEODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev,play]"
+      - name: Render frames through pygame
+        run: |
+          python - <<'PY'
+          import pygame
+          from gameboy import GameBoy, build_demo_rom, WIDTH, HEIGHT
+          from gameboy.png import DMG_PALETTE
+          pygame.init()
+          screen = pygame.display.set_mode((WIDTH * 2, HEIGHT * 2))
+          gb = GameBoy.from_bytes(build_demo_rom())
+          table = [bytes(c) for c in DMG_PALETTE]
+          for _ in range(30):
+              pixels = gb.run_frame()
+              buffer = b"".join([table[s & 3] for s in pixels])
+              image = pygame.image.frombuffer(buffer, (WIDTH, HEIGHT), "RGB").convert()
+              pygame.transform.scale(image, screen.get_size(), screen)
+              pygame.display.flip()
+          print("rendered 30 frames through the display path")
+          PY
