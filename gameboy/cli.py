@@ -159,6 +159,12 @@ def main(argv: list[str] | None = None) -> int:
     play_parser.add_argument("--scale", type=int, default=4)
     play_parser.add_argument("--grey", action="store_true", help="use greys, not the green LCD")
 
+    menu = sub.add_parser("menu", help="the home screen — pick a cartridge and play")
+    menu.add_argument("--scale", type=int, default=4)
+    menu.add_argument("--roms", help="a folder of .gb files to list")
+    menu.add_argument("--grey", action="store_true")
+    menu.set_defaults(func="menu")
+
     sub.add_parser("demo", help="run the built-in demo cartridge in a window")
 
     shot = sub.add_parser("screenshot", help="render frames to a PNG, no window needed")
@@ -190,6 +196,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     command = args.command
 
+    if command == "menu":
+        from .display import home
+
+        return home(scale=args.scale, roms=args.roms,
+                    palette=GREY_PALETTE if args.grey else DMG_PALETTE)
     if command in ("run", "demo"):
         from .display import play
 
@@ -210,8 +221,10 @@ def main(argv: list[str] | None = None) -> int:
     if command == "debug":
         return debug(args.rom)
 
-    parser.print_help()
-    return 1
+    # Bare `python -m gameboy` opens the menu, which is what someone means.
+    from .display import home
+
+    return home()
 
 
 if __name__ == "__main__":  # pragma: no cover

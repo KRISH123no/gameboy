@@ -14,13 +14,32 @@ the sprite once per vertical blank, exactly as a real game does.
 
 ```bash
 pip install -e ".[dev,play]"
-python -m gameboy demo              # play the built-in cartridge in a window
+python -m gameboy menu              # the home screen: pick a cartridge and play
+python -m gameboy demo              # straight into the built-in cartridge
 python -m gameboy run tetris.gb     # play your own ROM
 python -m gameboy screenshot --frames 120 --out frame.png
 python -m gameboy debug             # step through instructions
 ```
 
 It runs at **62 fps**, slightly faster than the original hardware's 59.7.
+
+## The home screen
+
+`python -m gameboy menu` lists the built-in cartridge and any `.gb` files it finds, and launches
+them. Escape comes back to the list; closing the window ends the session.
+
+It is drawn **at 160×144, in the console's own four shades**, then scaled up with everything else —
+so the menu is the same size of pixel as the game and reads as part of the hardware rather than a
+dialog bolted to the front of it. The palette key works on it too.
+
+The text is a hand-drawn 5×7 bitmap font. Rendering a normal font at eight pixels and scaling it up
+does not make pixel art, it makes a blurred small font: strokes land between pixels and
+antialiasing turns them grey. Written out as bits, every stroke is one pixel wide and lands exactly
+where it was put, at any scale.
+
+Scaling is nearest-neighbour with a one-pixel grid laid over the top. Smooth scaling turns pixel art
+into soup; hard edges plus the grid reads as an LCD, which is what people mean by "pixelated" when
+they do not mean "blurry".
 
 ## What's inside
 
@@ -50,7 +69,7 @@ driven by exactly this count, and a wrong number tears the screen.
 ## What the tests actually check
 
 ```bash
-pytest -q     # 558 tests, under two seconds
+pytest -q     # 597 tests, under two seconds
 ruff check .
 ```
 
