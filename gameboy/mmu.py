@@ -27,6 +27,24 @@ WRAM_SIZE = 0x2000
 HRAM_SIZE = 0x7F
 
 
+#: The addresses in $FF00-$FF7F that an original DMG simply does not implement
+#: — the gaps between register blocks, and the ones the Game Boy Color added.
+#: Every one of them reads back $FF, because an unconnected data line floats
+#: high. Writes to them go nowhere.
+UNMAPPED_IO = frozenset(
+    [0xFF03, 0xFF15, 0xFF1F]
+    + list(range(0xFF08, 0xFF0F))  # between the serial port and IF
+    + list(range(0xFF27, 0xFF30))  # between the sound registers and wave RAM
+    # $FF4C upwards is where the Game Boy Color put KEY1, VBK, the HDMA
+    # registers, the infrared port, the colour palettes and SVBK. A DMG has
+    # none of them.
+    + list(range(0xFF4C, 0xFF80))
+)
+
+#: Where the Game Boy Color put its speed-switch register.
+KEY1_ADDRESS = 0xFF4D
+
+
 class MMU:
     def __init__(self, cartridge: Cartridge | None = None) -> None:
         self.cartridge = cartridge
@@ -45,6 +63,8 @@ class MMU:
         #: written, or games that save and restore them break.
         self.io = bytearray(0x80)
         self.serial_output: list[int] = []
+        #: Set when a cartridge writes KEY1, which only Color hardware has.
+        self.double_speed_requested = False
 
     # ------------------------------------------------------------------- read
 
@@ -72,6 +92,15 @@ class MMU:
         return self.interrupt_enable
 
     def _read_io(self, address: int) -> int:
+        if address in UNMAPPED_IO:
+            # A register the DMG does not have reads back as all ones, not as
+            # zero. That is not a cosmetic detail: Infinity asks for Game Boy
+            # Color double-speed mode by writing KEY1 ($FF4D) and then spins
+            # until bit 7 of it reads high. On real DMG hardware the register
+            # does not exist, the read returns $FF, bit 7 is already set and
+            # the loop falls straight through on its first pass. Returning
+            # zero made that wait loop unexitable.
+            return 0xFF
         if address == 0xFF00:
             return self.joypad.read() if self.joypad else 0xFF
         if address == 0xFF0F:
@@ -122,6 +151,18 @@ class MMU:
         self.interrupt_enable = value
 
     def _write_io(self, address: int, value: int) -> None:
+        if address == KEY1_ADDRESS:
+            # Only a Game Boy Color can honour this. A cartridge that asks for
+            # double speed without first checking what it is running on has
+            # assumed Color hardware, and nothing this machine does will
+            # satisfy it. Record the request so the emulator can say so
+            # instead of showing a white screen: Infinity writes KEY1, runs
+            # STOP and then loops until the speed has changed, which on a DMG
+            # is forever.
+            self.double_speed_requested = True
+            return
+        if address in UNMAPPED_IO:
+            return  # nothing is connected to it, so the write goes nowhere
         if address == 0xFF00:
             if self.joypad:
                 self.joypad.write(value)

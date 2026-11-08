@@ -140,6 +140,8 @@ def play(gameboy: GameBoy, *, scale: int = 4, palette=DMG_PALETTE, title: str | 
             _chrome(pygame, screen, lcd_rect, gameboy.title or "GAME BOY",
                     f"{clock.get_fps():.0f} fps" if not turbo else "fast forward")
             screen.blit(panel, lcd_rect)
+            if gameboy.mmu.double_speed_requested:
+                _needs_colour(pygame, screen, lcd_rect)
             pygame.display.flip()
 
         clock.tick(0 if turbo else FPS)
@@ -223,6 +225,30 @@ def home(*, scale: int = 4, palette=DMG_PALETTE, roms: str | None = None) -> int
         screen.blit(panel, lcd_rect)
         pygame.display.flip()
         clock.tick(60)
+
+
+def _needs_colour(pygame, screen, lcd_rect) -> None:
+    """Say why the screen is blank, rather than leaving the player guessing.
+
+    A cartridge that writes KEY1 is asking for the Game Boy Color's
+    double-speed mode. This is a DMG, so the request can never be granted and
+    a game that waits for it never gets any further — Infinity writes KEY1,
+    runs STOP and then loops until the speed changes. Printing nothing at all
+    looks like a broken emulator. It is a cartridge on the wrong machine.
+    """
+    from . import font
+
+    lines = ("THIS CARTRIDGE NEEDS", "A GAME BOY COLOR")
+    scale = max(1, lcd_rect.width // 170)
+    wash = pygame.Surface(lcd_rect.size, pygame.SRCALPHA)
+    wash.fill((16, 18, 14, 220))
+    gap = font.height_at(scale) + 6 * scale
+    top = (lcd_rect.height - gap * len(lines)) // 2
+    for row, line in enumerate(lines):
+        x = (lcd_rect.width - font.measure_at(line, scale)) // 2
+        font.draw(wash, line, x, top + row * gap, (214, 230, 150), scale=scale,
+                  pygame=pygame)
+    screen.blit(wash, lcd_rect.topleft)
 
 
 def _machine_for(entry, GameBoy):

@@ -354,3 +354,51 @@ def test_a_long_title_that_does_not_look_like_a_code_is_kept_whole():
     header = parse_header(_titled(b"SUPER MARIO LAND"))
     assert header.manufacturer == ""
     assert header.title.startswith("SUPER MARIO")
+
+
+# --------------------------------------------------- registers a DMG lacks
+
+
+@pytest.mark.parametrize(
+    "address,what",
+    [
+        (0xFF4D, "KEY1, the Color speed switch"),
+        (0xFF4F, "VBK, the Color VRAM bank"),
+        (0xFF70, "SVBK, the Color WRAM bank"),
+        (0xFF03, "a gap between register blocks"),
+        (0xFF08, "a gap after the serial port"),
+        (0xFF27, "a gap before wave RAM"),
+    ],
+)
+def test_a_register_the_dmg_does_not_have_reads_as_ones(address, what):
+    """An unconnected data line floats high, so the read is $FF, not zero.
+
+    Infinity asks for Color double-speed mode by writing KEY1 and then spins
+    until bit 7 of it reads back high. On real hardware the register is absent,
+    the read is $FF, bit 7 is already set and the wait loop falls through on
+    its first pass. Returning zero made that loop unexitable.
+    """
+    unit = MMU(load_cartridge(make_rom()))
+    assert unit.read8(address) == 0xFF, what
+
+
+def test_writes_to_an_absent_register_go_nowhere():
+    unit = MMU(load_cartridge(make_rom()))
+    unit.write8(0xFF4F, 0x01)
+    assert unit.read8(0xFF4F) == 0xFF
+
+
+def test_writing_key1_records_that_the_cartridge_wants_colour_hardware():
+    """Only a Game Boy Color can grant it, so the emulator says so on screen
+    rather than showing a blank frame and looking broken."""
+    unit = MMU(load_cartridge(make_rom()))
+    assert not unit.double_speed_requested
+    unit.write8(0xFF4D, 0x01)
+    assert unit.double_speed_requested
+
+
+def test_a_register_the_dmg_does_have_still_reads_back_what_was_written():
+    """The guard above must not swallow the registers that do exist."""
+    unit = MMU(load_cartridge(make_rom()))
+    unit.write8(0xFF24, 0x77)  # NR50, a sound register with no home yet
+    assert unit.read8(0xFF24) == 0x77

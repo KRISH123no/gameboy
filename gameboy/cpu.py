@@ -35,6 +35,9 @@ INTERRUPT_VECTORS = (0x40, 0x48, 0x50, 0x58, 0x60)
 
 IF_ADDRESS = 0xFF0F
 IE_ADDRESS = 0xFFFF
+#: STOP reads the joypad to decide what to do, and resets the divider.
+JOYP_ADDRESS = 0xFF00
+DIV_ADDRESS = 0xFF04
 
 
 class Bus(Protocol):
@@ -187,7 +190,17 @@ class CPU:
         if self._service_interrupt():
             return self.cycles - start
 
-        if self.halted or self.stopped:
+        if self.stopped:
+            # STOP mode ends when one of the four joypad lines goes low. Games
+            # use it as a power-saving standby and expect to come back from
+            # it, so this cannot be a one-way door.
+            if (self.bus.read8(JOYP_ADDRESS) & 0x0F) != 0x0F:
+                self.stopped = False
+            else:
+                self.tick(4)
+                return self.cycles - start
+
+        if self.halted:
             # A halted CPU still burns cycles, which is how the timer and the
             # PPU keep running while a game waits for VBlank.
             self.tick(4)
@@ -272,8 +285,7 @@ class CPU:
                 self.write8(address + 1, (self.reg.sp >> 8) & 0xFF)
                 return
             if y == 2:  # STOP
-                self.fetch8()
-                self.stopped = True
+                self._stop()
                 return
             if y == 3:  # JR d8
                 offset = _signed(self.fetch8())
@@ -657,14 +669,69 @@ class CPU:
 
     # -------------------------------------------------------------------- halt
 
+    def _stop(self) -> None:
+        """STOP, which does four different things depending on the machine.
+
+        The documented decision tree asks three questions: is a button being
+        held on a line the joypad register currently selects, was a Game Boy
+        Color speed switch requested through KEY1, and is an interrupt
+        pending. This is a DMG, so KEY1 does not exist and a speed switch can
+        never have been asked for, which leaves three outcomes:
+
+        * no button held - the machine enters STOP mode and DIV is reset. It
+          stays there until a button line goes low, which is the low-power
+          standby the instruction is for.
+        * a button held, no interrupt pending - HALT mode instead, DIV
+          untouched.
+        * a button held and an interrupt pending - nothing happens at all, and
+          STOP is a one-byte instruction rather than two.
+
+        The byte after STOP is otherwise skipped and ignored, which is why
+        assemblers emit `STOP 0`.
+        """
+        # A selected button pulls its line low, so any zero in the low nibble
+        # of the joypad register means something is being held.
+        button_held = (self.bus.read8(JOYP_ADDRESS) & 0x0F) != 0x0F
+        if button_held:
+            if self._pending_interrupts():
+                return  # one byte, no mode change, DIV left alone
+            self.fetch8()
+            self.halted = True
+            return
+        self.fetch8()
+        self.stopped = True
+        # Writing DIV clears the whole 16-bit divider, not just the byte on
+        # show, which is exactly what entering STOP mode does to it.
+        self.bus.write8(DIV_ADDRESS, 0)
+
     def _halt(self) -> None:
         """HALT, including the hardware bug it is famous for.
 
         With interrupts disabled and one already pending, the real chip fails
         to increment PC after the halt, so the next byte executes twice. Games
         were built against that behaviour, so emulating it is not optional.
+
+        `_ime_pending` has to be part of the test. `EI` takes effect after the
+        instruction that follows it, so in the sequence
+
+            EI
+            HALT
+
+        IME is still clear while HALT executes, but it is about to be set and
+        the pending interrupt is about to be taken. The bug does not happen;
+        the interrupt is serviced normally and the handler returns to the
+        instruction after the HALT.
+
+        Reading only `self.ime` here fired the bug in that sequence, and then
+        the leftover flag rewound PC inside the interrupt handler instead —
+        making the handler's first instruction, a `PUSH`, run twice. One extra
+        word on the stack meant the matching `RETI` returned to a pointer
+        table rather than to the game, which is where Tobu Tobu Girl died
+        after its publisher screen. Real hardware cannot even reach that
+        state: the bug requires IME to stay clear, and a serviced interrupt
+        requires it set, so the two are mutually exclusive.
         """
-        if not self.ime and self._pending_interrupts():
+        if not self.ime and not self._ime_pending and self._pending_interrupts():
             # Do not rewind PC here: that would re-execute the HALT itself and
             # spin forever. The flag makes the *next* fetch repeat instead.
             self.halt_bug = True
