@@ -84,22 +84,34 @@ def measure(text: str) -> int:
     return max(0, len(text) * (WIDTH + TRACKING) - TRACKING)
 
 
-def draw(surface, text: str, x: int, y: int, shade: int) -> int:
-    """Write text one pixel at a time. Returns the x it finished at.
+def draw(surface, text: str, x: int, y: int, shade, *, scale: int = 1, pygame=None) -> int:
+    """Write text, one square per bit. Returns the x it finished at.
 
-    `set_at` rather than a blit: at this size the whole string is a few
-    hundred pixels, and it keeps the glyphs exactly where they were defined.
+    At scale 1 each bit is a pixel and `set_at` is the cheapest thing that
+    works. Above that each bit is a filled square, which keeps the strokes
+    exactly one unit wide however large the text — the whole point of a
+    bitmap font, and the thing scaling a rendered image destroys.
     """
-    width = surface.get_width()
-    height = surface.get_height()
+    width, height = surface.get_width(), surface.get_height()
     for character in text:
         rows = glyph(character)
         for row, bits in enumerate(rows):
             for column, bit in enumerate(bits):
                 if bit != "1":
                     continue
-                px, py = x + column, y + row
-                if 0 <= px < width and 0 <= py < height:
-                    surface.set_at((px, py), shade)
-        x += WIDTH + TRACKING
+                px, py = x + column * scale, y + row * scale
+                if scale == 1:
+                    if 0 <= px < width and 0 <= py < height:
+                        surface.set_at((px, py), shade)
+                else:
+                    surface.fill(shade, (px, py, scale, scale))
+        x += (WIDTH + TRACKING) * scale
     return x
+
+
+def measure_at(text: str, scale: int) -> int:
+    return measure(text) * scale
+
+
+def height_at(scale: int) -> int:
+    return HEIGHT * scale
