@@ -324,10 +324,13 @@ def launch(*, roms: str | None = None, palette=DMG_PALETTE) -> int:
                 tile = state.selected
                 if tile is None:
                     continue
+                # Measured first: handing over to `play` tears this display
+                # down, and the old surface cannot be asked its size once it
+                # has gone. Reading it afterwards raised "display Surface
+                # quit" the moment anyone pressed PLAY.
+                size = screen.get_size()
                 _play_from_launcher(pygame, tile, library, palette)
-                screen = pygame.display.set_mode(
-                    screen.get_size(), pygame.RESIZABLE
-                )
+                screen = pygame.display.set_mode(size, pygame.RESIZABLE)
                 pygame.display.set_caption("gameboy")
                 record = library.records.get(tile.digest)
                 if record is not None:
