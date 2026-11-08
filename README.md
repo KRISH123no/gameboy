@@ -50,7 +50,7 @@ driven by exactly this count, and a wrong number tears the screen.
 ## What the tests actually check
 
 ```bash
-pytest -q     # 555 tests, under two seconds
+pytest -q     # 558 tests, under two seconds
 ruff check .
 ```
 
@@ -73,6 +73,11 @@ Three real bugs the suite caught while this was being written:
   instruction is `DI`, they must stay off. Mine turned them back on.
 - **The window would have crashed on its first frame** — `blit_into` is not a method on a pygame
   surface, and nothing but actually running it would have found that.
+- **And then it crashed on launch anyway, for two months.** The key map built pygame's constants
+  from each key's label — `f"K_{name}"` — which gives `K_up`. pygame spells named keys upper and
+  letters lower, so six of the eight did not exist and `demo` died on the line that builds the map.
+  Every headless path passed the whole time: the benchmark, the screenshots, all 555 tests. The
+  names are now pygame's own, spelled out, and a test asserts each one resolves.
 
 ## Playing your own ROMs
 

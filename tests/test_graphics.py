@@ -329,3 +329,33 @@ def test_a_frame_can_be_rendered_as_text():
     gameboy = GameBoy.from_bytes(build_demo_rom())
     art = to_ascii(gameboy.run_frames(3), WIDTH, HEIGHT)
     assert art.count("\n") > 10
+
+
+# ------------------------------------------------------------------ keys
+
+
+def test_every_key_in_the_map_is_a_real_pygame_constant():
+    """The map was built with f"K_{name}" from the key's label, which gives
+    `K_up`. pygame spells named keys upper and letters lower, so the window
+    raised AttributeError on the line that builds the map — on every launch,
+    for two months, while the headless paths all passed.
+    """
+    pygame = pytest.importorskip("pygame")
+
+    from gameboy.display import KEY_MAP
+
+    missing = [name for name in KEY_MAP if not hasattr(pygame, name)]
+    assert not missing, f"not pygame constants: {missing}"
+
+
+def test_the_whole_pad_is_mapped():
+    from gameboy.display import KEY_MAP
+    from gameboy.joypad import Button
+
+    assert set(KEY_MAP.values()) == set(Button)
+
+
+def test_no_two_keys_fight_over_one_button():
+    from gameboy.display import KEY_MAP
+
+    assert len(set(KEY_MAP.values())) == len(KEY_MAP)

@@ -18,15 +18,21 @@ FPS = 59.7  # the real refresh rate, not 60
 
 #: Arrows for the pad, Z and X for A and B, as every emulator has done since
 #: the nineties.
+#:
+#: The names are pygame's own constants, spelled exactly, rather than built
+#: from the key's label — because pygame is not consistent about case. Named
+#: keys are upper (`K_UP`, `K_RETURN`) and letters are lower (`K_z`), so
+#: `f"K_{name}"` produces `K_up`, which does not exist, and the window dies
+#: on the line that builds the map. It did, for two months.
 KEY_MAP = {
-    "up": Button.UP,
-    "down": Button.DOWN,
-    "left": Button.LEFT,
-    "right": Button.RIGHT,
-    "z": Button.A,
-    "x": Button.B,
-    "return": Button.START,
-    "rshift": Button.SELECT,
+    "K_UP": Button.UP,
+    "K_DOWN": Button.DOWN,
+    "K_LEFT": Button.LEFT,
+    "K_RIGHT": Button.RIGHT,
+    "K_z": Button.A,
+    "K_x": Button.B,
+    "K_RETURN": Button.START,
+    "K_RSHIFT": Button.SELECT,
 }
 
 HELP = """
@@ -51,7 +57,7 @@ def play(gameboy: GameBoy, *, scale: int = 4, palette=DMG_PALETTE, title: str | 
     clock = pygame.time.Clock()
     print(HELP)
 
-    keys = {getattr(pygame, f"K_{name}"): button for name, button in KEY_MAP.items()}
+    keys = {getattr(pygame, name): button for name, button in KEY_MAP.items()}
     palettes = [DMG_PALETTE, GREY_PALETTE]
     palette_index = palettes.index(palette) if palette in palettes else 0
     rgb_tables = [[bytes(colour) for colour in option] for option in palettes]
