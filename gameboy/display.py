@@ -237,3 +237,132 @@ def _machine_for(entry, GameBoy):
     except Exception as error:  # noqa: BLE001 - a bad ROM must not end the session
         print(f"could not load {entry.label}: {error}")
         return None
+
+
+def launch(*, roms: str | None = None, palette=DMG_PALETTE) -> int:
+    """The launcher: a sidebar, covers, and a cartridge you can start.
+
+    This window is drawn at window resolution, unlike the console's own menu
+    in `shell.py`, which is drawn at 160x144. The difference is deliberate:
+    the menu is part of the handheld and should look like it, while the
+    launcher is the application around the handheld and has a desktop's room
+    to work in. Both are made of the same bitmap font, so they still read as
+    one product.
+    """
+    try:
+        import pygame
+    except ImportError:
+        print('the launcher needs pygame: pip install "gameboy[play]"')
+        return 1
+
+    from . import launcher
+    from .library import Library
+    from .shell import find_roms
+
+    pygame.init()
+    pygame.display.set_caption("gameboy")
+    screen = pygame.display.set_mode(launcher.WINDOW, pygame.RESIZABLE)
+    clock = pygame.time.Clock()
+
+    library = Library.load()
+
+    def progress(done: int, total: int, label: str) -> None:
+        # Pumped by hand: generating covers blocks, and an unpumped window is
+        # reported by macOS as not responding after a couple of seconds.
+        pygame.event.pump()
+        launcher.draw_loading(pygame, screen, done, total, label)
+        pygame.display.flip()
+
+    state = launcher.State(
+        tiles=launcher.build_tiles(pygame, find_roms(roms), library, progress)
+    )
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return 0
+            if event.type == pygame.VIDEORESIZE:
+                screen = pygame.display.set_mode(
+                    (max(event.w, 900), max(event.h, 620)), pygame.RESIZABLE
+                )
+                continue
+            if event.type != pygame.KEYDOWN:
+                continue
+
+            if state.typing:
+                if event.key in (pygame.K_RETURN, pygame.K_ESCAPE):
+                    state.typing = False
+                    if event.key == pygame.K_ESCAPE:
+                        state.set_query("")
+                elif event.key == pygame.K_BACKSPACE:
+                    state.set_query(state.query[:-1])
+                elif event.unicode and event.unicode.isprintable():
+                    state.set_query(state.query + event.unicode)
+                continue
+
+            columns = state.columns(screen.get_width())
+            if event.key == pygame.K_ESCAPE:
+                if state.query:
+                    state.set_query("")
+                    continue
+                pygame.quit()
+                return 0
+            elif event.key in (pygame.K_SLASH, pygame.K_f):
+                state.typing = True
+            elif event.key == pygame.K_TAB:
+                state.switch(NAV_NEXT[state.view])
+            elif event.key == pygame.K_LEFT:
+                state.move(-1)
+            elif event.key == pygame.K_RIGHT:
+                state.move(1)
+            elif event.key == pygame.K_UP:
+                state.move(-columns)
+            elif event.key == pygame.K_DOWN:
+                state.move(columns)
+            elif event.key in (pygame.K_RETURN, pygame.K_z, pygame.K_SPACE):
+                tile = state.selected
+                if tile is None:
+                    continue
+                _play_from_launcher(pygame, tile, library, palette)
+                screen = pygame.display.set_mode(
+                    screen.get_size(), pygame.RESIZABLE
+                )
+                pygame.display.set_caption("gameboy")
+                record = library.records.get(tile.digest)
+                if record is not None:
+                    tile.played = record.played_label
+                    tile.last_played = record.last_played
+
+        launcher.render(pygame, screen, state, library)
+        pygame.display.flip()
+        clock.tick(60)
+
+
+#: Tab cycles the sidebar, so the order lives in one place.
+NAV_NEXT = {"Home": "Library", "Library": "Home"}
+
+
+def _play_from_launcher(pygame, tile, library, palette) -> None:
+    """Run a cartridge, then write down how long it was played for.
+
+    The window is torn down first so two displays never exist at once, the
+    same way the console's own menu hands over to `play`.
+    """
+    from .launcher import load_machine
+
+    try:
+        machine, _ = load_machine(tile)
+    except Exception as error:  # noqa: BLE001 - a bad ROM must not end the session
+        print(f"could not load {tile.label}: {error}")
+        return
+    pygame.display.quit()
+    started = time.perf_counter()
+    try:
+        play(machine, palette=palette, title=f"gameboy — {tile.label}")
+    finally:
+        # Recorded even if the emulator raised, because the time was still
+        # spent, and a crash that silently erases an hour is worse than a
+        # crash.
+        library.played(tile.digest, tile.label, time.perf_counter() - started)
+        pygame.display.init()

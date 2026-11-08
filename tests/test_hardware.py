@@ -278,3 +278,79 @@ def test_releasing_restores_the_bit():
     joypad.press(Button.B)
     joypad.release(Button.B)
     assert joypad.read() & 0x02 == 0x02
+
+
+# ------------------------------------------------------------- serial port
+
+
+def _serial_mmu():
+    return MMU(load_cartridge(make_rom()))
+
+
+def test_an_internally_clocked_transfer_completes():
+    """$81 is how a test ROM prints: start a transfer on our own clock."""
+    unit = _serial_mmu()
+    unit.write8(0xFF01, ord("A"))
+    unit.write8(0xFF02, 0x81)
+    assert unit.serial_text == "A"
+    assert unit.interrupt_flags & 0x08
+
+
+def test_the_start_bit_clears_once_the_transfer_is_over():
+    unit = _serial_mmu()
+    unit.write8(0xFF01, 0x42)
+    unit.write8(0xFF02, 0x81)
+    assert unit.read8(0xFF02) & 0x80 == 0
+
+
+def test_an_externally_clocked_transfer_never_completes():
+    """The regression that broke three games.
+
+    Bit 0 of $FF02 chooses the clock: 1 is this Game Boy, 0 is the one on
+    the other end of the cable. With nothing plugged in, a transfer on the
+    external clock can never finish, so no byte is sent and no interrupt is
+    raised. Completing it anyway told every game that probes for a link
+    cable that a second player had answered — Tobu Tobu Girl, Deadeus and
+    Infinity all do this at boot, and all three went into a two-player
+    handshake that could not be completed and crashed.
+    """
+    unit = _serial_mmu()
+    unit.write8(0xFF01, ord("A"))
+    unit.write8(0xFF02, 0x80)
+    assert unit.serial_text == ""
+    assert unit.interrupt_flags & 0x08 == 0
+
+
+def test_a_pending_external_transfer_keeps_its_start_bit():
+    """It is still waiting, so the game can see that it never finished."""
+    unit = _serial_mmu()
+    unit.write8(0xFF02, 0x80)
+    assert unit.read8(0xFF02) & 0x80
+
+
+# --------------------------------------------------- the manufacturer code
+
+
+def _titled(text: bytes, cgb: int = 0x00) -> bytes:
+    rom = bytearray(make_rom())
+    rom[0x0134:0x0144] = text.ljust(0x10, b"\x00")[:0x10]
+    rom[0x0143] = cgb
+    return bytes(rom)
+
+
+def test_a_short_title_is_left_exactly_as_it_is():
+    assert parse_header(_titled(b"TOBU")).title == "TOBU"
+    assert parse_header(_titled(b"TOBU")).manufacturer == ""
+
+
+def test_a_long_title_gives_up_its_last_four_bytes_to_the_code():
+    """`RHYTHM LANDSNSD` is `RHYTHM LAND` with a manufacturer code stuck on."""
+    header = parse_header(_titled(b"RHYTHM LANDSNSD"))
+    assert header.title == "RHYTHM LAND"
+    assert header.manufacturer == "SNSD"
+
+
+def test_a_long_title_that_does_not_look_like_a_code_is_kept_whole():
+    header = parse_header(_titled(b"SUPER MARIO LAND"))
+    assert header.manufacturer == ""
+    assert header.title.startswith("SUPER MARIO")

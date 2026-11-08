@@ -130,11 +130,23 @@ class MMU:
             self.io[0x01] = value
             return
         if address == 0xFF02:
-            # Writing 0x81 starts a serial transfer. Nothing is connected, but
-            # test ROMs report their results this way, so the byte is captured.
-            if value & 0x80:
+            # Bit 7 starts a transfer and bit 0 chooses the clock: 1 means
+            # this Game Boy drives it, 0 means the Game Boy on the other end
+            # of the cable does. With nothing plugged in, only an
+            # internally clocked transfer can ever finish, so $81 completes
+            # and $80 hangs forever — which is exactly how a game asks
+            # whether a second player is there.
+            #
+            # Completing $80 as well told every such game that a link cable
+            # was connected and had already replied. Tobu Tobu Girl, Deadeus
+            # and Infinity all probe this way at boot and all three went into
+            # their two-player path and died on a handshake that could never
+            # come. The test ROMs were unaffected, because they write $81.
+            if value & 0x81 == 0x81:
                 self.serial_output.append(self.io[0x01])
                 self.interrupt_flags |= 0x08
+                # The transfer is over, so the start bit clears itself.
+                value &= 0x7F
             self.io[0x02] = value
             return
         if address == 0xFF0F:

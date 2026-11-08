@@ -38,6 +38,7 @@ MBC_NAMES = {
 @dataclass(frozen=True)
 class Header:
     title: str
+    manufacturer: str
     cartridge_type: int
     rom_banks: int
     ram_banks: int
@@ -52,12 +53,41 @@ class Header:
         return self.rom_banks * ROM_BANK_SIZE // 1024
 
 
+def _read_title(rom: bytes) -> tuple[str, str]:
+    """The title, and the manufacturer code hiding at the end of it.
+
+    The title field is sixteen bytes at 0x0134. Later cartridges carved the
+    last four of them (0x013F-0x0142) into a manufacturer code and the one
+    after that into the Game Boy Color flag, without moving the title — so a
+    title that fills the field runs straight into the code and arrives as
+    `2048-gb    XXXX` or `RHYTHM LANDSNSD`.
+
+    There is no flag saying which layout a cartridge used, so the test is
+    the shape of the bytes: a title long enough to reach the code, four
+    printable uppercase characters sitting exactly where the code belongs,
+    and a recognised Game Boy Color flag after them. Short titles are left
+    alone, which is every cartridge from before the convention existed.
+    """
+    raw = bytes(rom[0x0134:0x0144])
+    text = raw.split(b"\x00")[0].decode("ascii", "replace").strip()
+    code = raw[0x0B:0x0F].decode("ascii", "replace")
+    long_enough = len(raw.split(b"\x00")[0]) > 0x0B
+    looks_like_code = len(code) == 4 and all(
+        c.isascii() and (c.isupper() or c.isdigit()) for c in code
+    )
+    if long_enough and looks_like_code and rom[0x0143] in (0x00, 0x80, 0xC0):
+        trimmed = raw[:0x0B].split(b"\x00")[0].decode("ascii", "replace").strip()
+        if trimmed:
+            return trimmed, code
+    return text, ""
+
+
 def parse_header(rom: bytes) -> Header:
     """Read the 80-byte header every cartridge carries at 0x0100."""
     if len(rom) < 0x0150:
         raise ValueError("ROM is too short to contain a header")
 
-    title = bytes(rom[0x0134:0x0144]).split(b"\x00")[0].decode("ascii", "replace").strip()
+    title, manufacturer = _read_title(rom)
     cartridge_type = rom[0x0147]
     rom_banks = 2 << rom[0x0148] if rom[0x0148] <= 0x08 else len(rom) // ROM_BANK_SIZE
     ram_banks = {0x00: 0, 0x01: 0, 0x02: 1, 0x03: 4, 0x04: 16, 0x05: 8}.get(rom[0x0149], 0)
@@ -70,6 +100,7 @@ def parse_header(rom: bytes) -> Header:
 
     return Header(
         title=title,
+        manufacturer=manufacturer,
         cartridge_type=cartridge_type,
         rom_banks=max(2, rom_banks),
         ram_banks=ram_banks,
